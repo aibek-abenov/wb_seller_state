@@ -1,0 +1,54 @@
+<div style="max-width:900px; margin:24px auto;">
+  <h2>Заполните данные по товарам</h2>
+
+  <p>Эти значения получены из вашего Excel файла.</p>
+
+  <%= form_with url: save_pricing_dashboard_index_path, method: :post do %>
+    <table style="width:100%; border-collapse:collapse; margin-top:16px;">
+      <tr>
+        <th style="text-align:left; padding:8px;">Баркод</th>
+        <th style="text-align:left; padding:8px;">Наименование</th>
+        <th style="text-align:left; padding:8px;">Закупочная цена</th>
+        <th style="text-align:left; padding:8px;">Прочие расходы</th>
+      </tr>
+
+      <% @products.each_with_index do |product, i| %>
+        <tr>
+          <td style="padding:8px;">
+            <%= product["sku"] %>
+
+            <%= hidden_field_tag "products[#{i}][sku]", product["sku"] %>
+          </td>
+
+          <td style="padding:8px;">
+            <%=
+              [
+                product["name_primary"].presence,
+                product["name_secondary"].presence
+              ].compact.join(" / ")
+            %>
+          </td>
+
+          <td style="padding:8px;">
+            <%= number_field_tag "products[#{i}][purchase_price]", "",
+                                 step: 0.01,
+                                 min: 0,
+                                 required: true %>
+          </td>
+
+          <td style="padding:8px;">
+            <%= number_field_tag "products[#{i}][extra_costs]", "",
+                                 step: 0.01,
+                                 min: 0,
+                                 required: true %>
+          </td>
+        </tr>
+      <% end %>
+    </table>
+
+    <div style="margin-top:16px;">
+      <%= submit_tag "Сохранить и продолжить",
+                     style: "padding:10px 16px; border-radius:10px; background:#2563eb; color:#fff;" %>
+    </div>
+  <% end %>
+</div>

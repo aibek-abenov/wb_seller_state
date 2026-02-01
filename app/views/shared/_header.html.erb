@@ -1,0 +1,38 @@
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <%= link_to "WB Seller Stat", dashboard_index_path, class: "navbar-brand" %>
+
+    <button class="navbar-toggler"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#mainNavbar"
+            aria-controls="mainNavbar"
+            aria-expanded="false"
+            aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="mainNavbar">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item">
+          <%= link_to "Дашборд", dashboard_index_path, class: "nav-link" %>
+        </li>
+        <li class="nav-item">
+          <%= link_to "Pricing", pricing_dashboard_index_path, class: "nav-link" %>
+        </li>
+      </ul>
+
+      <div class="d-flex align-items-center gap-3">
+        <span class="text-light small">
+          <%= current_user.email %>
+        </span>
+
+        <%= button_to "Выйти",
+                      destroy_user_session_path,
+                      method: :delete,
+                      form: { data: { turbo: false } },
+                      class: "btn btn-outline-light btn-sm" %>
+      </div>
+    </div>
+  </div>
+</nav>

@@ -1,0 +1,12 @@
+<h1>Файл готов</h1>
+
+<p>Обработка завершена. Нажмите кнопку ниже, чтобы скачать файл.</p>
+
+<%= button_to "Скачать обработанный файл",
+              download_processed_export_dashboard_index_path(format: :xlsx),
+              method: :post,
+              form: { target: "_blank", data: { turbo: false } },
+              class: "btn btn-primary" %>
+<br><br>
+
+<%= link_to "Вернуться на дашборд", dashboard_index_path, class: "btn btn-secondary" %>

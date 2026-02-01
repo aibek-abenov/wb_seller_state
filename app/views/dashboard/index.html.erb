@@ -1,0 +1,62 @@
+<div style="padding:32px; max-width:820px; margin:auto;">
+
+  <h1>Личный кабинет</h1>
+
+  <p>
+    Добро пожаловать,
+    <strong><%= current_user.email %></strong>
+  </p>
+
+  <hr style="margin: 16px 0;">
+
+  <% if notice %>
+    <div style="padding:10px; background:#ecfdf5; border:1px solid #34d399; border-radius:8px;">
+      <%= notice %>
+    </div>
+  <% end %>
+
+  <% if alert %>
+    <div style="padding:10px; background:#fef2f2; border:1px solid #f87171; border-radius:8px;">
+      <%= alert %>
+    </div>
+  <% end %>
+
+  <h2>Загрузка Excel файла</h2>
+
+  <p style="color:#6b7280;">
+    Поддерживается формат <strong>.xlsx</strong>
+  </p>
+
+  <%= form_with url: upload_dashboard_index_path,
+                multipart: true,
+                method: :post,
+                style: "margin-top:12px;" do |f| %>
+
+    <div style="padding:16px; border:1px dashed #9ca3af; border-radius:12px;">
+      <label style="font-weight:600;">Выберите файл</label><br>
+
+      <%= f.file_field :file,
+                       accept: ".xlsx",
+                       style: "margin-top:8px;" %>
+
+      <br>
+
+      <%= f.submit "Загрузить и обработать",
+                   style: "margin-top:14px;
+                           padding:10px 16px;
+                           border-radius:10px;
+                           background:#2563eb;
+                           color:#fff;
+                           cursor:pointer;" %>
+    </div>
+
+  <% end %>
+
+  <hr style="margin: 20px 0;">
+
+  <% if current_user.admin? %>
+    <%= link_to "Перейти в Avo", avo_path %>
+    <br>
+  <% end %>
+</div>
+
