@@ -22,15 +22,18 @@ class DashboardController < ApplicationController
       return
     end
 
-    # 1️⃣ Сохраняем файл в постоянное хранилище
+    # 1️⃣ Сохраняем файл на диск
     stored_path = Uploads::Uploader.call(file: file)
 
-    # 2️⃣ Парсим товары
+    # 2️⃣ Парсим товары (массив хэшей с ключами sku/name_primary/name_secondary)
     product_names = Excel::Parser.call(file: file)
 
-    # 3️⃣ Кладем в сессию
-    session[:uploaded_file_path]   = stored_path
-    session[:uploaded_product_names] = product_names
+    # 3️⃣ Большие данные кладём в cache, в session — только ключ
+    cache_key = "uploaded_products:#{SecureRandom.hex(12)}"
+    Rails.cache.write(cache_key, product_names, expires_in: 30.minutes)
+
+    session[:uploaded_file_path] = stored_path
+    session[:uploaded_products_cache_key] = cache_key
 
     redirect_to pricing_dashboard_index_path
   end
@@ -38,10 +41,18 @@ class DashboardController < ApplicationController
   # ------------------ PRICING FORM ------------------
 
   def pricing
-    @products = session[:uploaded_product_names]
+    cache_key = session[:uploaded_products_cache_key]
+    products = cache_key.present? ? Rails.cache.read(cache_key) : nil
+
+    # Вьюха ожидает строковые ключи: product["sku"], product["name_primary"] ...
+    @products =
+      Array(products).map do |p|
+        p.respond_to?(:to_h) ? p.to_h.stringify_keys : p
+      end
 
     if @products.blank?
       redirect_to dashboard_index_path, alert: "Нет загруженного файла"
+      return
     end
   end
 
@@ -56,8 +67,6 @@ class DashboardController < ApplicationController
           extra_costs: row[:extra_costs].to_f
         }
       end.reject { |p| p[:sku].blank? }
-
-    session[:product_pricing] = products
 
     file_path = session[:uploaded_file_path]
 
@@ -83,7 +92,7 @@ class DashboardController < ApplicationController
 
     FileUtils.mv(new_file_path, stored_path)
 
-    # сохраняем в session данные для скачивания
+    # сохраняем в session данные для скачивания (маленькие)
     session[:processed_export] = {
       token: token,
       path: stored_path,
@@ -95,12 +104,19 @@ class DashboardController < ApplicationController
                 status: :see_other
   end
 
+  # ------------------ EXPORT READY ------------------
+
   def export_ready
     data = session[:processed_export]
     path = data && (data["path"] || data[:path])
 
-    redirect_to dashboard_index_path, alert: "Нет подготовленного файла для скачивания." unless path.present?
+    unless path.present?
+      redirect_to dashboard_index_path, alert: "Нет подготовленного файла для скачивания."
+      return
+    end
   end
+
+  # ------------------ DOWNLOAD ------------------
 
   def download_processed_export
     data = session[:processed_export]
@@ -124,7 +140,6 @@ class DashboardController < ApplicationController
               disposition: "attachment"
   end
 
-
   def inactive
   end
 
@@ -135,9 +150,12 @@ class DashboardController < ApplicationController
   def cleanup_upload!(file_path)
     ::File.delete(file_path) if ::File.exist?(file_path)
 
+    if (key = session[:uploaded_products_cache_key]).present?
+      Rails.cache.delete(key)
+    end
+
     session.delete(:uploaded_file_path)
-    session.delete(:uploaded_product_names)
-    session.delete(:product_pricing)
+    session.delete(:uploaded_products_cache_key)
   end
 
   def check_active_subscription!

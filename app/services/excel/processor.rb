@@ -5,22 +5,25 @@ module Excel
   class Processor
     # индексы Roo — с нуля
     SELECTED_COLS = {
-      f:  5,
-      i:  8,
+      supplier_article:        5,  # F  — Артикул поставщика
+      barcode:                 8,  # I  — Баркод (SKU)
 
-      ah: 33,
-      ai: 34,
-      aj: 35,
-      ak: 36,
-      ao: 40,
-      aq: 42,
+      payout_amount:          33,  # AH — К перечислению продавцу за реализованный товар
+      deliveries_count:       34,  # AI — Количество доставок
+      returns_count:          35,  # AJ — Количество возврата
+      delivery_service_fee:   36,  # AK — Услуги по доставке товара покупателю
+      penalties_total:        40,  # AO — Общая сумма штрафов
+      logistics_and_fines:    42,  # AQ — Виды логистики, штрафов и корректировок ВВ
 
-      bh: 59,
-      bi: 60,
-      bj: 61
+      storage_fee:            59,  # BH — Хранение
+      withholdings:           60,  # BI — Удержания
+      reception_operations:   61   # BJ — Операции на приёмке
     }.freeze
 
-    DO_NOT_SUM = %i[f i].freeze
+    DO_NOT_SUM = %i[
+      supplier_article
+      barcode
+    ].freeze
 
     def self.call(file_path:, pricing:)
       new(file_path, pricing).call
@@ -43,18 +46,25 @@ module Excel
       end
 
       result_rows = []
-      header = SELECTED_COLS.keys.map { |k| k.to_s.upcase } + ["PURCHASE_PRICE", "EXTRA_COSTS"]
+      header = SELECTED_COLS.keys.map { |k| k.to_s.camelcase } + ["PurchasePrice", "ExtraCosts"]
       result_rows << header
 
       rows.each_slice(2) do |row1, row2|
         merged = merge_pair(row1, row2)
-        sku = merged[:i].to_s
+        sku = merged[:barcode].to_s
 
-        price = @pricing_by_sku[sku]
+        if merged[:logistics_and_fines] == "К клиенту при отмене От клиента при отмене"
+          purchase_price = 0.0
+          extra_costs    = 0.0
+        else
+          price = @pricing_by_sku[sku]
+          purchase_price = price&.dig(:purchase_price)
+          extra_costs    = price&.dig(:extra_costs)
+        end
 
-        result_rows << merged.values + [
-          price&.dig(:purchase_price),
-          price&.dig(:extra_costs)
+        result_rows << SELECTED_COLS.keys.map { |k| merged[k] } + [
+          purchase_price,
+          extra_costs
         ]
       end
 
@@ -103,39 +113,26 @@ module Excel
       value.to_f
     end
 
-    # result_rows уже включает:
-    # 0: F
-    # 1: I
-    # 2: AH
-    # 3: AI
-    # 4: AJ
-    # 5: AK
-    # 6: AO
-    # 7: AQ
-    # 8: BH
-    # 9: BI
-    # 10: BJ
-    # 11: PURCHASE_PRICE
-    # 12: EXTRA_COSTS
+
     def add_profits_and_margin_percentages(result_rows)
       # header
-      result_rows[0] = result_rows[0] + ["NET_PROFIT", "MARGIN_PERCENTAGE"]
+      result_rows[0] = result_rows[0] + ["NetProfit", "MarginPercentage"]
 
       result_rows.each_with_index do |row, idx|
         next if idx == 0 # пропускаем header
 
-        ah = n(row[2])
+        ah = n(row[2]) # AH — К перечислению продавцу за реализованный товар
 
         net_profit =
           if ah.positive?
-            ah - (
-              n(row[5]) +  # AK
-                n(row[6]) +  # AO
-                n(row[8]) +  # BH
-                n(row[9]) +  # BI
-                n(row[10]) + # BJ
-                n(row[11]) + # PURCHASE_PRICE
-                n(row[12])   # EXTRA_COSTS
+            ah - ( # AH — К перечислению продавцу за реализованный товар
+              n(row[5]) +  # AK — Услуги по доставке товара покупателю
+                n(row[6]) +  # AO — Общая сумма штрафов
+                n(row[8]) +  # BH — Хранение
+                n(row[9]) +  # BI — Удержания
+                n(row[10]) + # BJ — Операции на приёмке
+                n(row[11]) + # PurchasePrice - Закупочная цена
+                n(row[12])   # ExtraCosts - Прочие расходы
             )
           else
             0.0
@@ -177,9 +174,11 @@ module Excel
 
       totals = Array.new(col_indexes.length, 0.0)
 
+      binding.pry
       result_rows.each_with_index do |row, idx|
         next if idx == 0 # header
 
+        binding.pry
         col_indexes.each_with_index do |col_idx, j|
           totals[j] += n(row[col_idx])
         end
