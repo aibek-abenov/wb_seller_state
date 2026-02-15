@@ -7,6 +7,46 @@
               method: :post,
               form: { target: "_blank", data: { turbo: false } },
               class: "btn btn-primary" %>
+
 <br><br>
+
+<% if @totals_titles.any? && @totals_values.any? %>
+  <h3>Итоги</h3>
+
+  <div style="overflow:auto; max-width:100%; border:1px solid #eee; border-radius:10px;">
+    <table style="border-collapse:collapse; width:100%; min-width:1100px;">
+      <thead>
+      <tr>
+        <% @totals_titles.each do |title| %>
+          <th style="text-align:left; padding:10px; border-bottom:1px solid #eee; background:#fafafa;">
+            <%= title %>
+          </th>
+        <% end %>
+      </tr>
+      </thead>
+
+      <tbody>
+      <tr>
+        <% @totals_values.each_with_index do |val, i| %>
+          <td style="padding:10px; border-bottom:1px solid #f3f3f3;">
+            <% if val.is_a?(Numeric) %>
+              <%# последний столбец — процент маржинальности %>
+              <% if i == @totals_values.length - 1 %>
+                <%= number_with_precision(val, precision: 2) %>%
+              <% else %>
+                <%= number_with_precision(val, precision: 2, delimiter: " ") %>
+              <% end %>
+            <% else %>
+              <%= val %>
+            <% end %>
+          </td>
+        <% end %>
+      </tr>
+      </tbody>
+    </table>
+  </div>
+<% end %>
+
+<br>
 
 <%= link_to "Вернуться на дашборд", dashboard_index_path, class: "btn btn-secondary" %>

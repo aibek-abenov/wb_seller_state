@@ -75,10 +75,14 @@ class DashboardController < ApplicationController
       return
     end
 
-    new_file_path = Excel::Processor.call(
+    # Processor теперь возвращает { path:, totals: ... }
+    result = Excel::Processor.call(
       file_path: file_path,
       pricing: products
     )
+
+    new_file_path = result[:path]
+    totals        = result[:totals]
 
     cleanup_upload!(file_path)
 
@@ -92,11 +96,12 @@ class DashboardController < ApplicationController
 
     FileUtils.mv(new_file_path, stored_path)
 
-    # сохраняем в session данные для скачивания (маленькие)
+    # сохраняем в session данные для скачивания + totals для отображения
     session[:processed_export] = {
       token: token,
       path: stored_path,
-      name: download_name
+      name: download_name,
+      totals: totals
     }
 
     redirect_to export_ready_dashboard_index_path,
@@ -114,6 +119,11 @@ class DashboardController < ApplicationController
       redirect_to dashboard_index_path, alert: "Нет подготовленного файла для скачивания."
       return
     end
+
+    totals = data && (data["totals"] || data[:totals])
+
+    @totals_titles = totals && (totals["titles"] || totals[:titles]) || []
+    @totals_values = totals && (totals["values"] || totals[:values]) || []
   end
 
   # ------------------ DOWNLOAD ------------------
