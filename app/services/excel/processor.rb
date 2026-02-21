@@ -1,10 +1,12 @@
 require "roo"
 require "caxlsx"
+require "bigdecimal"
 
 module Excel
   class Processor
     SALE_REASON = "Продажа".freeze
     RETURN_REASON = "Возврат".freeze
+    LOGISTICS_REASON = "Логистика".freeze
 
     VALID_PAYMENT_REASONS = [
       "Возврат",
@@ -29,6 +31,27 @@ module Excel
       delivery_service_fee:  36   # AK — Логистика
     }.freeze
 
+    HEADER = [
+      "Баркод",
+      "Артикул поставщика",
+      "Обоснование для оплаты",
+      "К перечислению продавцу",
+      "Услуги по доставке (логистика)",
+      "Упаковка или прочие расходы",
+      "Закуп",
+      "Прибыль",
+      "Прибыль в процентах %"
+    ].freeze
+
+    TOTALS_TITLES = [
+      "К перечислению продавцу (итого)",
+      "Логистика (итого)",
+      "Упаковка или прочие расходы",
+      "Закуп (итого)",
+      "Прибыль (как бухгалтер)",
+      "Прибыль в процентах %"
+    ].freeze
+
     def self.call(file_path:, pricing:)
       new(file_path, pricing).call
     end
@@ -38,24 +61,30 @@ module Excel
       @pricing_by_sku = pricing.index_by { |p| p[:sku].to_s }
     end
 
-    # @return
-    # {
-    #   path: "/tmp/xxx.xlsx",
-    #   totals: { titles: [...], values: [...] }
-    # }
+    # @return { path: "/tmp/xxx.xlsx", totals: { titles: [...], values: [...] } }
     def call
-      workbook = Roo::Excelx.new(@file_path)
-      sheet    = workbook.sheet(0)
+      filtered_rows = stream_and_filter
+      result_rows, totals = calculate(filtered_rows)
+      path = export_excel(result_rows)
 
-      # Однопроходная обработка: фильтрация + merge логистики в один проход
-      pending_logistics = {}  # barcode -> accumulated logistics fee
+      { path: path, totals: totals }
+    end
+
+    private
+
+    # Однопроходная обработка: фильтрация + merge логистики
+    def stream_and_filter
+      workbook = Roo::Excelx.new(@file_path)
+      sheet = workbook.sheet(0)
+
+      pending_logistics = {}
       filtered_rows = []
 
       first = true
       sheet.each_row_streaming do |row|
         if first
           first = false
-          next # skip header
+          next
         end
 
         barcode_val = cell_value(row, BARCODE_INDEX).to_s.strip
@@ -75,8 +104,8 @@ module Excel
           doc_type: doc_type_val
         }
 
-        is_logistics = reason_val == "Логистика" && doc_type_val.empty?
-        is_sale = reason_val == "Продажа" && doc_type_val == "Продажа"
+        is_logistics = reason_val == LOGISTICS_REASON && doc_type_val.empty?
+        is_sale = reason_val == SALE_REASON && doc_type_val == SALE_REASON
 
         if is_logistics
           pending_logistics[barcode_val] =
@@ -97,50 +126,41 @@ module Excel
         filtered_rows << {
           barcode: barcode,
           supplier_article: "",
-          payment_reason: "Логистика",
-          payout_amount: 0.0,
+          payment_reason: LOGISTICS_REASON,
+          payout_amount: BigDecimal("0"),
           delivery_service_fee: fee,
           doc_type: ""
         }
       end
 
-      # Формируем результат
-      header = [
-        "Баркод",
-        "Артикул поставщика",
-        "Обоснование для оплаты",
-        "К перечислению продавцу",
-        "Услуги по доставке (логистика)",
-        "Упаковка или прочие расходы",
-        "Закуп",
-        "Прибыль",
-        "Прибыль в процентах %"
-      ]
+      filtered_rows
+    ensure
+      workbook&.close if workbook.respond_to?(:close)
+    end
 
-      result_rows = [header]
+    # Расчёт прибыли и формирование result_rows + totals
+    def calculate(filtered_rows)
+      result_rows = [HEADER]
 
-      total_payout    = 0.0
-      total_logistics = 0.0
-      total_extra     = 0.0
-      total_purchase  = 0.0
+      total_payout    = BigDecimal("0")
+      total_logistics = BigDecimal("0")
+      total_extra     = BigDecimal("0")
+      total_purchase  = BigDecimal("0")
 
       filtered_rows.each do |data|
         barcode = data[:barcode]
         reason  = data[:payment_reason]
 
         payout = n(data[:payout_amount])
-
-        if reason == RETURN_REASON && payout.positive?
-          payout = -payout
-        end
+        payout = -payout if reason == RETURN_REASON && payout.positive?
 
         logistics = n(data[:delivery_service_fee])
 
         total_payout    += payout
         total_logistics += logistics
 
-        purchase_value = 0.0
-        extra_value    = 0.0
+        purchase_value = BigDecimal("0")
+        extra_value    = BigDecimal("0")
 
         if reason == SALE_REASON
           unit = @pricing_by_sku[barcode]
@@ -152,55 +172,33 @@ module Excel
         end
 
         profit = payout - logistics - extra_value - purchase_value
-
-        denom = extra_value + purchase_value
-        profit_percent =
-          if denom.positive?
-            (profit * 100.0) / denom
-          else
-            0.0
-          end
+        profit_percent = percent(profit, extra_value + purchase_value)
 
         result_rows << [
           barcode,
           data[:supplier_article],
           reason,
-          payout.round(2),
-          logistics.round(2),
-          extra_value.round(2),
-          purchase_value.round(2),
-          profit.round(2),
-          profit_percent.round(2)
+          payout.to_f.round(2),
+          logistics.to_f.round(2),
+          extra_value.to_f.round(2),
+          purchase_value.to_f.round(2),
+          profit.to_f.round(2),
+          profit_percent.to_f.round(2)
         ]
       end
 
-      # Totals
       total_profit = total_payout - total_logistics - total_extra - total_purchase
-      total_denom  = total_extra + total_purchase
-
-      total_profit_percent =
-        if total_denom.positive?
-          (total_profit * 100.0) / total_denom
-        else
-          0.0
-        end
+      total_profit_percent = percent(total_profit, total_extra + total_purchase)
 
       totals_block = {
-        titles: [
-          "К перечислению продавцу (итого)",
-          "Логистика (итого)",
-          "Упаковка или прочие расходы",
-          "Закуп (итого)",
-          "Прибыль (как бухгалтер)",
-          "Прибыль в процентах %"
-        ],
+        titles: TOTALS_TITLES,
         values: [
-          total_payout.round(2),
-          total_logistics.round(2),
-          total_extra.round(2),
-          total_purchase.round(2),
-          total_profit.round(2),
-          total_profit_percent.round(2)
+          total_payout.to_f.round(2),
+          total_logistics.to_f.round(2),
+          total_extra.to_f.round(2),
+          total_purchase.to_f.round(2),
+          total_profit.to_f.round(2),
+          total_profit_percent.to_f.round(2)
         ]
       }
 
@@ -208,42 +206,43 @@ module Excel
       result_rows << totals_block[:titles]
       result_rows << totals_block[:values]
 
-      path = export_excel(result_rows)
-
-      { path: path, totals: totals_block }
+      [result_rows, totals_block]
     end
-
-    private
 
     def cell_value(row, index)
       cell = row[index]
       cell.respond_to?(:value) ? cell.value : cell
     end
 
-    # безопасно приводим к числу
+    # Безопасно приводим к BigDecimal
     def n(value)
-      return 0.0 if value.nil?
-      return value.to_f if value.is_a?(Numeric)
+      return BigDecimal("0") if value.nil?
+      return BigDecimal(value, Float::DIG) if value.is_a?(Numeric)
 
-      s = value.to_s.strip
-      s = s.gsub(" ", "").tr(",", ".")
-      Float(s)
-    rescue StandardError
-      value.to_f
+      s = value.to_s.strip.gsub(" ", "").tr(",", ".")
+      BigDecimal(s)
+    rescue ArgumentError, TypeError
+      BigDecimal("0")
+    end
+
+    def percent(profit, denom)
+      denom.positive? ? (profit * 100) / denom : BigDecimal("0")
     end
 
     def export_excel(rows)
       exports_dir = Rails.root.join("tmp", "exports")
       FileUtils.mkdir_p(exports_dir)
       path = exports_dir.join("result_#{SecureRandom.hex(8)}.xlsx").to_s
+      tmp_path = "#{path}.tmp"
 
       Axlsx::Package.new(use_shared_strings: false) do |p|
         p.workbook.add_worksheet(name: "Result") do |sheet|
           rows.each { |r| sheet.add_row(r) }
         end
-        p.serialize(path)
+        p.serialize(tmp_path)
       end
 
+      FileUtils.mv(tmp_path, path)
       path
     end
   end
