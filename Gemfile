@@ -44,7 +44,7 @@ gem "thruster", require: false
 gem 'devise'
 
 # Avo для админки
-gem 'avo', '~> 3.10'
+gem 'avo', '~> 3.29'
 
 # Для работы с Excel позже
 gem 'roo'  # чтение Excel
