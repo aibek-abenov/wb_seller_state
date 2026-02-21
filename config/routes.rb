@@ -22,6 +22,9 @@ Rails.application.routes.draw do
       get  :pricing
       post :save_pricing
 
+      get  :processing
+      get  :job_status
+
       get  :export_ready
       post :download_processed_export
     end

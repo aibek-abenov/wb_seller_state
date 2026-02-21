@@ -50,6 +50,7 @@ gem 'avo', '~> 3.10'
 gem 'roo'  # чтение Excel
 gem 'caxlsx_rails' # генерация Excel (опционально)
 gem "bootstrap", "~> 5.3"
+gem "rack-attack"
 gem "cssbundling-rails"
 
 group :development, :test do

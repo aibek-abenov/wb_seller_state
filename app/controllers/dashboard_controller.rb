@@ -22,6 +22,11 @@ class DashboardController < ApplicationController
       return
     end
 
+    if file.size > 10.megabytes
+      redirect_to dashboard_index_path, alert: "Файл слишком большой (макс. 10 МБ)"
+      return
+    end
+
     # 1️⃣ Сохраняем файл на диск
     stored_path = Uploads::Uploader.call(file: file)
 
@@ -59,6 +64,15 @@ class DashboardController < ApplicationController
   # ------------------ SAVE PRICING ------------------
 
   def save_pricing
+    # Не позволяем ставить в очередь, если уже есть активная задача
+    if session[:processing_job_token].present?
+      existing = Rails.cache.read("excel_job:#{session[:processing_job_token]}")
+      if existing && existing[:status] == "processing"
+        redirect_to processing_dashboard_index_path, alert: "У вас уже есть файл в обработке"
+        return
+      end
+    end
+
     products =
       params.require(:products).values.map do |row|
         {
@@ -75,38 +89,56 @@ class DashboardController < ApplicationController
       return
     end
 
-    # Processor теперь возвращает { path:, totals: ... }
-    result = Excel::Processor.call(
+    job_token = SecureRandom.hex(16)
+
+    ExcelProcessingJob.perform_later(
+      user_id: current_user.id,
       file_path: file_path,
-      pricing: products
+      pricing: products,
+      job_token: job_token
     )
 
-    new_file_path = result[:path]
-    totals        = result[:totals]
+    # Очищаем upload-данные из session (файл удалит job)
+    if (key = session[:uploaded_products_cache_key]).present?
+      Rails.cache.delete(key)
+    end
+    session.delete(:uploaded_file_path)
+    session.delete(:uploaded_products_cache_key)
 
-    cleanup_upload!(file_path)
+    session[:processing_job_token] = job_token
+    redirect_to processing_dashboard_index_path
+  end
 
-    # перемещаем результат в tmp/exports с безопасным именем
-    exports_dir = Rails.root.join("tmp", "exports")
-    FileUtils.mkdir_p(exports_dir)
+  # ------------------ PROCESSING STATUS ------------------
 
-    token = SecureRandom.hex(16)
-    download_name = "processed_#{Time.now.strftime("%Y%m%d_%H%M")}.xlsx"
-    stored_path = exports_dir.join("#{token}.xlsx").to_s
+  def processing
+    @job_token = session[:processing_job_token]
+    unless @job_token.present?
+      redirect_to dashboard_index_path, alert: "Нет активных задач"
+      return
+    end
+  end
 
-    FileUtils.mv(new_file_path, stored_path)
+  def job_status
+    job_token = session[:processing_job_token]
+    raw = Rails.cache.read("excel_job:#{job_token}")
+    status_data = raw.is_a?(Hash) ? raw.symbolize_keys : { status: "unknown" }
 
-    # сохраняем в session данные для скачивания + totals для отображения
-    session[:processed_export] = {
-      token: token,
-      path: stored_path,
-      name: download_name,
-      totals: totals
-    }
+    if status_data[:status] == "completed"
+      totals = status_data[:totals]
+      totals = totals.symbolize_keys if totals.is_a?(Hash)
 
-    redirect_to export_ready_dashboard_index_path,
-                notice: "Файл обработан. Нажмите «Скачать обработанный файл».",
-                status: :see_other
+      session[:processed_export] = {
+        token: job_token,
+        path: status_data[:path],
+        name: status_data[:name],
+        totals: totals
+      }
+      session.delete(:processing_job_token)
+      Rails.cache.delete("excel_job:#{job_token}")
+    end
+
+    render json: { status: status_data[:status], error: status_data[:error] }
   end
 
   # ------------------ EXPORT READY ------------------
@@ -156,17 +188,6 @@ class DashboardController < ApplicationController
   private
 
   # ------------------ HELPERS ------------------
-
-  def cleanup_upload!(file_path)
-    ::File.delete(file_path) if ::File.exist?(file_path)
-
-    if (key = session[:uploaded_products_cache_key]).present?
-      Rails.cache.delete(key)
-    end
-
-    session.delete(:uploaded_file_path)
-    session.delete(:uploaded_products_cache_key)
-  end
 
   def check_active_subscription!
     return if current_user.active?

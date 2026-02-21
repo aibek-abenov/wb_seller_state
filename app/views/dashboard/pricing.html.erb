@@ -1,54 +1,367 @@
-<div style="max-width:900px; margin:24px auto;">
-  <h2>Заполните данные по товарам</h2>
+<style>
+  /* ── Excel-like shell ── */
+  .excel-wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    font-family: Calibri, "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    color: #000;
+    border: 1px solid #8a8a8a;
+    background: #fff;
+    box-shadow: 0 2px 12px rgba(0,0,0,.18);
+  }
 
-  <p>Эти значения получены из вашего Excel файла.</p>
+  /* ── Title bar ── */
+  .excel-titlebar {
+    background: linear-gradient(180deg, #217346 0%, #1e6b40 100%);
+    color: #fff;
+    padding: 6px 14px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .excel-titlebar .file-icon {
+    width: 18px; height: 18px;
+    background: #fff;
+    color: #217346;
+    font-weight: 700;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+  }
+
+  /* ── Ribbon (simplified) ── */
+  .excel-ribbon {
+    background: #217346;
+    display: flex;
+    gap: 0;
+    padding: 0;
+    border-bottom: 1px solid #1a5c37;
+  }
+  .excel-ribbon-tab {
+    padding: 6px 18px;
+    color: rgba(255,255,255,.75);
+    font-size: 13px;
+    cursor: default;
+    border-bottom: 2px solid transparent;
+  }
+  .excel-ribbon-tab.active {
+    background: #f3f3f3;
+    color: #333;
+    border-bottom: 2px solid #f3f3f3;
+    border-radius: 4px 4px 0 0;
+  }
+
+  /* ── Formula bar ── */
+  .excel-formula-bar {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #c6c6c6;
+    background: #f8f8f8;
+    height: 28px;
+  }
+  .excel-cell-ref {
+    width: 70px;
+    text-align: center;
+    border-right: 1px solid #c6c6c6;
+    font-size: 12px;
+    color: #333;
+    line-height: 28px;
+    background: #fff;
+  }
+  .excel-fx {
+    padding: 0 8px;
+    color: #555;
+    font-style: italic;
+    font-size: 13px;
+    border-right: 1px solid #c6c6c6;
+    line-height: 28px;
+  }
+  .excel-formula-input {
+    flex: 1;
+    padding: 0 8px;
+    font-size: 13px;
+    line-height: 28px;
+    color: #888;
+  }
+
+  /* ── Spreadsheet grid ── */
+  .excel-grid {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  /* Column header row (A, B, C …) */
+  .excel-grid thead th {
+    background: #f0f0f0;
+    border: 1px solid #c6c6c6;
+    text-align: center;
+    font-weight: 400;
+    font-size: 12px;
+    color: #333;
+    padding: 3px 4px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    user-select: none;
+  }
+  /* Row-number column header (empty corner) */
+  .excel-grid thead th.corner {
+    width: 40px;
+    background: #f0f0f0;
+  }
+
+  /* Column widths */
+  .excel-grid .col-row-num { width: 40px; }
+  .excel-grid .col-barcode { width: 170px; }
+  .excel-grid .col-name    { }
+  .excel-grid .col-price   { width: 160px; }
+  .excel-grid .col-extra   { width: 160px; }
+
+  /* Data cells */
+  .excel-grid tbody td {
+    border: 1px solid #d4d4d4;
+    padding: 2px 5px;
+    height: 26px;
+    font-size: 13px;
+    vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Row number cells */
+  .excel-grid tbody td.row-num {
+    background: #f0f0f0;
+    text-align: center;
+    color: #333;
+    font-size: 12px;
+    border-right: 1px solid #c6c6c6;
+    user-select: none;
+  }
+
+  /* Inputs that look like bare cells */
+  .excel-grid tbody td input[type="number"] {
+    width: 100%;
+    height: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 0;
+    margin: 0;
+    -moz-appearance: textfield;
+    text-align: right;
+  }
+  .excel-grid tbody td input[type="number"]::-webkit-inner-spin-button,
+  .excel-grid tbody td input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  /* Cell focus = blue border like Excel selection */
+  .excel-grid tbody td:focus-within {
+    outline: 2px solid #217346;
+    outline-offset: -2px;
+    background: #e8f5e9;
+  }
+
+  /* ── Column sub-headers (actual labels) ── */
+  .excel-grid .label-row th {
+    background: #e2efda;
+    font-weight: 600;
+    font-size: 12px;
+    color: #1a4731;
+    padding: 5px 6px;
+    text-align: left;
+    border: 1px solid #b4c9a8;
+  }
+  .excel-grid .label-row th.row-num-label {
+    background: #f0f0f0;
+    border: 1px solid #c6c6c6;
+  }
+
+  /* ── Sheet tabs at bottom ── */
+  .excel-sheet-bar {
+    display: flex;
+    align-items: center;
+    background: #f0f0f0;
+    border-top: 1px solid #c6c6c6;
+    padding: 0;
+    height: 28px;
+    font-size: 12px;
+  }
+  .excel-sheet-nav {
+    display: flex;
+    gap: 2px;
+    padding: 0 8px;
+    color: #888;
+  }
+  .excel-sheet-nav span {
+    cursor: default;
+    padding: 0 4px;
+  }
+  .excel-sheet-tab {
+    padding: 4px 16px;
+    background: #fff;
+    border: 1px solid #c6c6c6;
+    border-bottom: none;
+    margin-top: -1px;
+    font-size: 12px;
+    cursor: default;
+    color: #333;
+  }
+  .excel-sheet-tab.active {
+    font-weight: 600;
+    border-top: 2px solid #217346;
+  }
+  .excel-sheet-tab-add {
+    padding: 4px 10px;
+    color: #888;
+    cursor: default;
+    font-size: 14px;
+  }
+
+  /* ── Status bar ── */
+  .excel-statusbar {
+    display: flex;
+    justify-content: space-between;
+    background: #217346;
+    color: rgba(255,255,255,.85);
+    font-size: 11px;
+    padding: 3px 14px;
+    border-radius: 0 0 0 0;
+  }
+
+  /* ── Submit row ── */
+  .excel-submit-row {
+    padding: 14px 16px;
+    background: #f8f8f8;
+    border-top: 1px solid #d4d4d4;
+    text-align: right;
+  }
+  .excel-submit-btn {
+    padding: 8px 24px;
+    background: #217346;
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    letter-spacing: .3px;
+  }
+  .excel-submit-btn:hover {
+    background: #1a5c37;
+  }
+</style>
+
+<div class="excel-wrap">
+  <!-- Title bar -->
+  <div class="excel-titlebar">
+    <div class="file-icon">X</div>
+    <span>Pricing — Wb Seller Stat</span>
+  </div>
+
+  <!-- Ribbon tabs -->
+  <div class="excel-ribbon">
+    <div class="excel-ribbon-tab">Файл</div>
+    <div class="excel-ribbon-tab active">Главная</div>
+    <div class="excel-ribbon-tab">Вставка</div>
+    <div class="excel-ribbon-tab">Данные</div>
+  </div>
+
+  <!-- Formula bar -->
+  <div class="excel-formula-bar">
+    <div class="excel-cell-ref">C2</div>
+    <div class="excel-fx">fx</div>
+    <div class="excel-formula-input">Введите значение…</div>
+  </div>
 
   <%= form_with url: save_pricing_dashboard_index_path, method: :post do %>
-    <table style="width:100%; border-collapse:collapse; margin-top:16px;">
-      <tr>
-        <th style="text-align:left; padding:8px;">Баркод</th>
-        <th style="text-align:left; padding:8px;">Наименование</th>
-        <th style="text-align:left; padding:8px;">Закупочная цена</th>
-        <th style="text-align:left; padding:8px;">Прочие расходы</th>
-      </tr>
+    <!-- Spreadsheet table -->
+    <table class="excel-grid">
+      <colgroup>
+        <col class="col-row-num">
+        <col class="col-barcode">
+        <col class="col-name">
+        <col class="col-price">
+        <col class="col-extra">
+      </colgroup>
 
-      <% @products.each_with_index do |product, i| %>
+      <thead>
+        <!-- Column letters -->
         <tr>
-          <td style="padding:8px;">
-            <%= product["sku"] %>
-
-            <%= hidden_field_tag "products[#{i}][sku]", product["sku"] %>
-          </td>
-
-          <td style="padding:8px;">
-            <%=
-              [
-                product["name_primary"].presence,
-                product["name_secondary"].presence
-              ].compact.join(" / ")
-            %>
-          </td>
-
-          <td style="padding:8px;">
-            <%= number_field_tag "products[#{i}][purchase_price]", "",
-                                 step: 0.01,
-                                 min: 0,
-                                 required: true %>
-          </td>
-
-          <td style="padding:8px;">
-            <%= number_field_tag "products[#{i}][extra_costs]", "",
-                                 step: 0.01,
-                                 min: 0,
-                                 required: true %>
-          </td>
+          <th class="corner"></th>
+          <th>A</th>
+          <th>B</th>
+          <th>C</th>
+          <th>D</th>
         </tr>
-      <% end %>
+        <!-- Actual labels -->
+        <tr class="label-row">
+          <th class="row-num-label"></th>
+          <th>Баркод</th>
+          <th>Наименование</th>
+          <th>Закупочная цена</th>
+          <th>Прочие расходы</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        <% @products.each_with_index do |product, i| %>
+          <tr>
+            <td class="row-num"><%= i + 2 %></td>
+
+            <td>
+              <%= product["sku"] %>
+              <%= hidden_field_tag "products[#{i}][sku]", product["sku"] %>
+            </td>
+
+            <td>
+              <%= [product["name_primary"].presence, product["name_secondary"].presence].compact.join(" / ") %>
+            </td>
+
+            <td>
+              <%= number_field_tag "products[#{i}][purchase_price]", "",
+                                   step: 0.01, min: 0, required: true,
+                                   placeholder: "0.00" %>
+            </td>
+
+            <td>
+              <%= number_field_tag "products[#{i}][extra_costs]", "",
+                                   step: 0.01, min: 0, required: true,
+                                   placeholder: "0.00" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
     </table>
 
-    <div style="margin-top:16px;">
-      <%= submit_tag "Сохранить и продолжить",
-                     style: "padding:10px 16px; border-radius:10px; background:#2563eb; color:#fff;" %>
+    <!-- Submit -->
+    <div class="excel-submit-row">
+      <%= submit_tag "Сохранить и продолжить", class: "excel-submit-btn" %>
     </div>
   <% end %>
+
+  <!-- Sheet tabs -->
+  <div class="excel-sheet-bar">
+    <div class="excel-sheet-nav">
+      <span>◀</span><span>▶</span>
+    </div>
+    <div class="excel-sheet-tab active">Pricing</div>
+    <div class="excel-sheet-tab">Лист2</div>
+    <div class="excel-sheet-tab-add">＋</div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="excel-statusbar">
+    <span>Готово</span>
+    <span>Товаров: <%= @products.size %></span>
+  </div>
 </div>

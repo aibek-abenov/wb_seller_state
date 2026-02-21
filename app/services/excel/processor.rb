@@ -4,13 +4,27 @@ require "caxlsx"
 module Excel
   class Processor
     SALE_REASON = "Продажа".freeze
+    RETURN_REASON = "Возврат".freeze
+
+    VALID_PAYMENT_REASONS = [
+      "Возврат",
+      "Логистика",
+      "Продажа",
+      "Удержание",
+      "Хранение",
+      "Штраф"
+    ].freeze
 
     # Roo индексы — с нуля
+    BARCODE_INDEX = 8   # I  — Баркод
+    DOCUMENT_TYPE_INDEX = 9 # J - Тип документа
+    REASON_INDEX  = 10  # K  — Обоснование для оплаты
+    DELIVERY_FEE_INDEX  = 36 # AK — Услуги по доставке товара покупателю (логистика)
+
     SELECTED_COLS = {
       supplier_article:      5,   # F  — Артикул поставщика
-      barcode:               8,   # I  — Баркод
-      payment_reason:        10,  # K  — Обоснование для оплаты
-
+      barcode:               BARCODE_INDEX,
+      payment_reason:        REASON_INDEX,
       payout_amount:         33,  # AH — К перечислению продавцу...
       delivery_service_fee:  36   # AK — Логистика
     }.freeze
@@ -24,7 +38,7 @@ module Excel
       @pricing_by_sku = pricing.index_by { |p| p[:sku].to_s }
     end
 
-    # Возвращает:
+    # @return
     # {
     #   path: "/tmp/xxx.xlsx",
     #   totals: { titles: [...], values: [...] }
@@ -33,16 +47,74 @@ module Excel
       workbook = Roo::Excelx.new(@file_path)
       sheet    = workbook.sheet(0)
 
+      # Однопроходная обработка: фильтрация + merge логистики в один проход
+      pending_logistics = {}  # barcode -> accumulated logistics fee
+      filtered_rows = []
+
+      first = true
+      sheet.each_row_streaming do |row|
+        if first
+          first = false
+          next # skip header
+        end
+
+        barcode_val = cell_value(row, BARCODE_INDEX).to_s.strip
+        next if barcode_val.empty?
+
+        reason_val = cell_value(row, REASON_INDEX).to_s.strip
+        next unless VALID_PAYMENT_REASONS.include?(reason_val)
+
+        doc_type_val = cell_value(row, DOCUMENT_TYPE_INDEX).to_s.strip
+
+        row_data = {
+          barcode: barcode_val,
+          supplier_article: cell_value(row, SELECTED_COLS[:supplier_article]).to_s.strip,
+          payment_reason: reason_val,
+          payout_amount: cell_value(row, SELECTED_COLS[:payout_amount]),
+          delivery_service_fee: cell_value(row, SELECTED_COLS[:delivery_service_fee]),
+          doc_type: doc_type_val
+        }
+
+        is_logistics = reason_val == "Логистика" && doc_type_val.empty?
+        is_sale = reason_val == "Продажа" && doc_type_val == "Продажа"
+
+        if is_logistics
+          pending_logistics[barcode_val] =
+            n(pending_logistics[barcode_val]) + n(row_data[:delivery_service_fee])
+          next
+        end
+
+        if is_sale && pending_logistics.key?(barcode_val)
+          row_data[:delivery_service_fee] =
+            n(row_data[:delivery_service_fee]) + pending_logistics.delete(barcode_val)
+        end
+
+        filtered_rows << row_data
+      end
+
+      # Оставшиеся логистики без продажи — как отдельные строки
+      pending_logistics.each do |barcode, fee|
+        filtered_rows << {
+          barcode: barcode,
+          supplier_article: "",
+          payment_reason: "Логистика",
+          payout_amount: 0.0,
+          delivery_service_fee: fee,
+          doc_type: ""
+        }
+      end
+
+      # Формируем результат
       header = [
-        "Barcode",
-        "SupplierArticle",
-        "PaymentReason",
-        "PayoutAmount",
-        "DeliveryServiceFee",
-        "ExtraCosts",     # Упаковка + дорога (из формы)
-        "PurchasePrice",  # Закуп (из формы)
-        "Profit",
-        "ProfitPercent"
+        "Баркод",
+        "Артикул поставщика",
+        "Обоснование для оплаты",
+        "К перечислению продавцу",
+        "Услуги по доставке (логистика)",
+        "Упаковка или прочие расходы",
+        "Закуп",
+        "Прибыль",
+        "Прибыль в процентах %"
       ]
 
       result_rows = [header]
@@ -52,23 +124,21 @@ module Excel
       total_extra     = 0.0
       total_purchase  = 0.0
 
-      sheet.each_with_index do |row, idx|
-        next if idx == 0 # header
+      filtered_rows.each do |data|
+        barcode = data[:barcode]
+        reason  = data[:payment_reason]
 
-        data = extract_selected_columns(row)
+        payout = n(data[:payout_amount])
 
-        barcode = data[:barcode].to_s.strip
-        next if barcode.empty?
+        if reason == RETURN_REASON && payout.positive?
+          payout = -payout
+        end
 
-        reason    = data[:payment_reason].to_s.strip
-        payout    = n(data[:payout_amount])
         logistics = n(data[:delivery_service_fee])
 
         total_payout    += payout
         total_logistics += logistics
 
-        # ✅ КАК У БУХГАЛТЕРА:
-        # закуп/прочие расходы проставляем просто по факту "Продажа"
         purchase_value = 0.0
         extra_value    = 0.0
 
@@ -93,7 +163,7 @@ module Excel
 
         result_rows << [
           barcode,
-          data[:supplier_article].to_s.strip,
+          data[:supplier_article],
           reason,
           payout.round(2),
           logistics.round(2),
@@ -104,6 +174,7 @@ module Excel
         ]
       end
 
+      # Totals
       total_profit = total_payout - total_logistics - total_extra - total_purchase
       total_denom  = total_extra + total_purchase
 
@@ -118,10 +189,10 @@ module Excel
         titles: [
           "К перечислению продавцу (итого)",
           "Логистика (итого)",
-          "Упаковка + дорога (итого)",
+          "Упаковка или прочие расходы",
           "Закуп (итого)",
           "Прибыль (как бухгалтер)",
-          "Прибыль в процентах % (как бухгалтер)"
+          "Прибыль в процентах %"
         ],
         values: [
           total_payout.round(2),
@@ -133,7 +204,6 @@ module Excel
         ]
       }
 
-      # добавим блок итогов в сам Excel (как в их файле)
       result_rows << []
       result_rows << totals_block[:titles]
       result_rows << totals_block[:values]
@@ -145,10 +215,12 @@ module Excel
 
     private
 
-    def extract_selected_columns(row)
-      SELECTED_COLS.transform_values { |idx| row[idx] }
+    def cell_value(row, index)
+      cell = row[index]
+      cell.respond_to?(:value) ? cell.value : cell
     end
 
+    # безопасно приводим к числу
     def n(value)
       return 0.0 if value.nil?
       return value.to_f if value.is_a?(Numeric)
@@ -161,9 +233,11 @@ module Excel
     end
 
     def export_excel(rows)
-      path = "/tmp/result_#{Time.now.to_i}.xlsx"
+      exports_dir = Rails.root.join("tmp", "exports")
+      FileUtils.mkdir_p(exports_dir)
+      path = exports_dir.join("result_#{SecureRandom.hex(8)}.xlsx").to_s
 
-      Axlsx::Package.new do |p|
+      Axlsx::Package.new(use_shared_strings: false) do |p|
         p.workbook.add_worksheet(name: "Result") do |sheet|
           rows.each { |r| sheet.add_row(r) }
         end

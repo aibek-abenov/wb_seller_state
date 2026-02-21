@@ -17,12 +17,17 @@ default: &default
   encoding: unicode
   # For details on connection pooling, see Rails configuration guide
   # https://guides.rubyonrails.org/configuring.html#database-pooling
-  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 }.to_i + 3 %>
 
 
 development:
-  <<: *default
-  database: wb_seller_stat_development
+  primary:
+    <<: *default
+    database: wb_seller_stat_development
+  queue:
+    <<: *default
+    database: wb_seller_stat_development_queue
+    migrations_paths: db/queue_migrate
 
   # The specified database role being used to connect to PostgreSQL.
   # To create additional roles in PostgreSQL see `$ createuser --help`.
@@ -55,8 +60,13 @@ development:
 # re-generated from your development database when you run "rake".
 # Do not set this db to the same as development or production.
 test:
-  <<: *default
-  database: wb_seller_stat_test
+  primary:
+    <<: *default
+    database: wb_seller_stat_test
+  queue:
+    <<: *default
+    database: wb_seller_stat_test_queue
+    migrations_paths: db/queue_migrate
 
 # As with config/credentials.yml, you never want to store sensitive information,
 # like your database password, in your source code. If your source code is

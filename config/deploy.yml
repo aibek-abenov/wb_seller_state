@@ -41,10 +41,11 @@ env:
     SOLID_QUEUE_IN_PUMA: true
 
     # Set number of processes dedicated to Solid Queue (default: 1)
-    # JOB_CONCURRENCY: 3
+    JOB_CONCURRENCY: 1
 
     # Set number of cores available to the application on each server (default: 1).
-    # WEB_CONCURRENCY: 2
+    WEB_CONCURRENCY: 2
+    RAILS_MAX_THREADS: 5
 
     # Match this to any external database server to configure Active Record correctly
     # Use wb_seller_stat-db for a db accessory server on same machine via local kamal docker network.

@@ -1,0 +1,49 @@
+<div style="padding:32px; max-width:600px; margin:auto; text-align:center;">
+  <%= turbo_stream_from "excel_processing_#{current_user.id}" %>
+
+  <div id="processing_status">
+    <h2>Обработка файла...</h2>
+    <p style="color:#6b7280;">
+      Пожалуйста, подождите. Это может занять до минуты.
+    </p>
+    <div class="spinner-border text-primary" role="status" style="margin-top:20px;">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var pollUrl = "<%= job_status_dashboard_index_path %>";
+    var redirectUrl = "<%= export_ready_dashboard_index_path %>";
+    var timer;
+
+    function poll() {
+      fetch(pollUrl, {
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
+        credentials: "same-origin"
+      })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+          if (data.status === "completed") {
+            window.location.replace(redirectUrl);
+          } else if (data.status === "failed") {
+            var el = document.getElementById("processing_status");
+            if (el) {
+              el.innerHTML =
+                '<h2>Ошибка обработки</h2>' +
+                '<p style="color:#ef4444;">' + (data.error || 'Произошла ошибка. Попробуйте снова.') + '</p>' +
+                '<a href="/dashboard" class="btn btn-primary">Вернуться на дашборд</a>';
+            }
+          } else {
+            timer = setTimeout(poll, 2000);
+          }
+        })
+        .catch(function() {
+          timer = setTimeout(poll, 3000);
+        });
+    }
+
+    poll();
+  })();
+</script>

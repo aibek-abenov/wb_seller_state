@@ -1,0 +1,5 @@
+<div id="processing_status">
+  <h2>Ошибка обработки</h2>
+  <p style="color:#ef4444;"><%= local_assigns[:error] || "Произошла ошибка. Попробуйте снова." %></p>
+  <%= link_to "Вернуться на дашборд", dashboard_index_path, class: "btn btn-primary" %>
+</div>
